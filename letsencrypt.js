@@ -29,6 +29,8 @@ module.exports.CreateLetsEncrypt = function (parent) {
     obj.runAsProduction = false;
     obj.redirWebServerHooked = false;
     obj.zerossl = false;
+    obj.challengeType = 'http-01';
+    obj.dnsProvider = null;
     obj.csr = null;
     obj.configErr = null;
     obj.configOk = false;
@@ -49,24 +51,78 @@ module.exports.CreateLetsEncrypt = function (parent) {
 
     // Hook up GreenLock to the redirection server
     if (obj.parent.config.settings.rediraliasport === 80) { obj.redirWebServerHooked = true; }
-    else if ((obj.parent.config.settings.rediraliasport == null) && (obj.parent.redirserver.port == 80)) { obj.redirWebServerHooked = true; }
+    else if ((obj.parent.config.settings.rediraliasport == null) && (obj.parent.redirserver != null) && (obj.parent.redirserver.port == 80)) { obj.redirWebServerHooked = true; }
 
     // Deal with HTTP challenges
-    function challengeCreateFn(authz, challenge, keyAuthorization) { if (challenge.type === 'http-01') { obj.challenges[challenge.token] = keyAuthorization; } }
-    function challengeRemoveFn(authz, challenge, keyAuthorization) { if (challenge.type === 'http-01') { delete obj.challenges[challenge.token]; } }
+    function challengeCreateFn(authz, challenge, keyAuthorization) {
+        if (challenge.type === 'http-01') {
+            obj.challenges[challenge.token] = keyAuthorization;
+        } else if ((challenge.type === 'dns-01') && (obj.dnsProvider != null)) {
+            var challengeDomain = authz.identifier.value.replace(/^\*\./, '');
+            return obj.dnsProvider.set({ challenge: { dnsPrefix: '_acme-challenge', dnsZone: challengeDomain, dnsAuthorization: keyAuthorization } });
+        }
+    }
+    function challengeRemoveFn(authz, challenge, keyAuthorization) {
+        if (challenge.type === 'http-01') {
+            delete obj.challenges[challenge.token];
+        } else if ((challenge.type === 'dns-01') && (obj.dnsProvider != null)) {
+            var challengeDomain = authz.identifier.value.replace(/^\*\./, '');
+            return obj.dnsProvider.remove({ challenge: { dnsPrefix: '_acme-challenge', dnsZone: challengeDomain, dnsAuthorization: keyAuthorization } });
+        }
+    }
     obj.challenge = function (token, hostname, func) { if (obj.challenges[token] != null) { obj.log("Succesful response to challenge."); } else { obj.log("Failed to respond to challenge, token: " + token + ", table: " + JSON.stringify(obj.challenges) + "."); } func(obj.challenges[token]); }
 
     // Get the current certificate
     obj.getCertificate = function(certs, func) {
         obj.runAsProduction = (obj.parent.config.letsencrypt.production === true);
         obj.zerossl = ((typeof obj.parent.config.letsencrypt.zerossl == 'object') ? obj.parent.config.letsencrypt.zerossl : false);
+        obj.challengeType = ((obj.parent.config.letsencrypt.challenge === 'dns-01') || (obj.parent.config.letsencrypt.dns != null)) ? 'dns-01' : 'http-01';
         obj.log("Getting certs from local store (" + (obj.runAsProduction ? "Production" : "Staging") + ")");
         if (certs.CommonName.indexOf('.') == -1) { obj.configErr = "Add \"cert\" value to settings in config.json before using Let's Encrypt."; parent.addServerWarning(obj.configErr); obj.log("WARNING: " + obj.configErr); func(certs); return; }
         if (obj.parent.config.letsencrypt == null) { obj.configErr = "No Let's Encrypt configuration"; parent.addServerWarning(obj.configErr); obj.log("WARNING: " + obj.configErr); func(certs); return; }
         if (obj.parent.config.letsencrypt.email == null) { obj.configErr = "Let's Encrypt email address not specified."; parent.addServerWarning(obj.configErr); obj.log("WARNING: " + obj.configErr); func(certs); return; }
-        if ((obj.parent.redirserver == null) || ((typeof obj.parent.config.settings.rediraliasport === 'number') && (obj.parent.config.settings.rediraliasport !== 80)) || ((obj.parent.config.settings.rediraliasport == null) && (obj.parent.redirserver.port !== 80))) { obj.configErr = "Redirection web server must be active on port 80 for Let's Encrypt to work."; parent.addServerWarning(obj.configErr); obj.log("WARNING: " + obj.configErr); func(certs); return; }
-        if (obj.redirWebServerHooked !== true) { obj.configErr = "Redirection web server not setup for Let's Encrypt to work."; parent.addServerWarning(obj.configErr); obj.log("WARNING: " + obj.configErr); func(certs); return; }
+        if ((obj.challengeType === 'http-01') && ((obj.parent.redirserver == null) || ((typeof obj.parent.config.settings.rediraliasport === 'number') && (obj.parent.config.settings.rediraliasport !== 80)) || ((obj.parent.config.settings.rediraliasport == null) && (obj.parent.redirserver.port !== 80)))) { obj.configErr = "Redirection web server must be active on port 80 for Let's Encrypt to work."; parent.addServerWarning(obj.configErr); obj.log("WARNING: " + obj.configErr); func(certs); return; }
+        if ((obj.challengeType === 'http-01') && (obj.redirWebServerHooked !== true)) { obj.configErr = "Redirection web server not setup for Let's Encrypt to work."; parent.addServerWarning(obj.configErr); obj.log("WARNING: " + obj.configErr); func(certs); return; }
         if ((obj.parent.config.letsencrypt.rsakeysize != null) && (obj.parent.config.letsencrypt.rsakeysize !== 2048) && (obj.parent.config.letsencrypt.rsakeysize !== 3072) && (obj.parent.config.letsencrypt.rsakeysize !== 4096)) { obj.configErr = "Invalid Let's Encrypt certificate key size, must be 2048, 3072 or 4096."; parent.addServerWarning(obj.configErr); obj.log("WARNING: " + obj.configErr); func(certs); return; }
+        if (obj.challengeType === 'dns-01') {
+            var dnsOptions = obj.parent.config.letsencrypt.dns || {};
+            var providerModule = dnsOptions.module || dnsOptions.provider;
+            if (providerModule == null) { obj.configErr = "DNS-01 challenge configured but no DNS provider module set."; parent.addServerWarning(obj.configErr); obj.log("WARNING: " + obj.configErr); func(certs); return; }
+            var moduleName = providerModule;
+            if ((typeof providerModule === 'string') && (providerModule.lastIndexOf('@') > 0)) {
+                var atIndex = providerModule.lastIndexOf('@');
+                if (atIndex > 0) { moduleName = providerModule.substring(0, atIndex); }
+            }
+            var providerConfig = (typeof dnsOptions.options === 'object' && dnsOptions.options != null) ? dnsOptions.options : Object.assign({}, dnsOptions);
+            delete providerConfig.provider;
+            delete providerConfig.module;
+            delete providerConfig.options;
+            try {
+                const Provider = require(moduleName);
+                if (Provider.create) {
+                    obj.dnsProvider = Provider.create(providerConfig);
+                } else if (typeof Provider === 'function') {
+                    try {
+                        obj.dnsProvider = new Provider(providerConfig);
+                    } catch (ex) {
+                        obj.dnsProvider = Provider(providerConfig);
+                    }
+                }
+            } catch (e) {
+                obj.configErr = "DNS-01 challenge module not installed: " + moduleName + ".";
+                parent.addServerWarning(obj.configErr);
+                obj.log("WARNING: " + obj.configErr);
+                func(certs);
+                return;
+            }
+            if ((obj.dnsProvider == null) || (typeof obj.dnsProvider.set !== 'function') || (typeof obj.dnsProvider.remove !== 'function')) {
+                obj.configErr = "DNS-01 provider did not return a valid handler.";
+                parent.addServerWarning(obj.configErr);
+                obj.log("WARNING: " + obj.configErr);
+                func(certs);
+                return;
+            }
+        }
         if (obj.checkInterval == null) { obj.checkInterval = setInterval(obj.checkRenewCertificate, 86400000); } // Call certificate check every 24 hours.
         obj.configOk = true;
 
@@ -218,6 +274,7 @@ module.exports.CreateLetsEncrypt = function (parent) {
                     email: obj.parent.config.letsencrypt.email,
                     termsOfServiceAgreed: true,
                     skipChallengeVerification: (obj.parent.config.letsencrypt.skipchallengeverification === true),
+                    challengePriority: (obj.challengeType === 'dns-01') ? ['dns-01', 'http-01'] : ['http-01', 'dns-01'],
                     challengeCreateFn,
                     challengeRemoveFn
                 }).then(function (cert) {
@@ -256,6 +313,7 @@ module.exports.CreateLetsEncrypt = function (parent) {
             configOk: obj.configOk,
             leDomains: obj.leDomains,
             challenges: obj.challenges,
+            challengeType: obj.challengeType,
             production: obj.runAsProduction,
             webServer: obj.redirWebServerHooked,
             certPath: obj.certPath,

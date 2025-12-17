@@ -4353,7 +4353,16 @@ function mainStart() {
         if (captcha == true) { modules.push('svg-captcha@1.4.0'); }
 
         if (sessionRecording == true) { modules.push('image-size@2.0.2'); } // Need to get the remote desktop JPEG sizes to index the recording file.
-        if (config.letsencrypt != null) { modules.push('acme-client@4.2.5'); } // Add acme-client module. We need to force v4.2.4 or higher since olver versions using SHA-1 which is no longer supported by Let's Encrypt.
+        if (config.letsencrypt != null) {
+            modules.push('acme-client@4.2.5');
+            if ((config.letsencrypt.challenge === 'dns-01') || (config.letsencrypt.dns != null)) {
+                var dnsModule = 'acme-dns-01-cloudflare@1.2.5';
+                if ((config.letsencrypt.dns != null) && (typeof config.letsencrypt.dns.provider == 'string')) { dnsModule = config.letsencrypt.dns.provider; }
+                if ((config.letsencrypt.dns != null) && (typeof config.letsencrypt.dns.module == 'string')) { dnsModule = config.letsencrypt.dns.module; }
+                if ((typeof dnsModule == 'string') && (dnsModule.indexOf('@') === -1)) { dnsModule += '@latest'; }
+                modules.push(dnsModule);
+            }
+        } // Add acme-client module. We need to force v4.2.4 or higher since olver versions using SHA-1 which is no longer supported by Let's Encrypt.
         if (config.settings.mqtt != null) { modules.push('aedes@0.51.3'); } // Add MQTT Modules
         if (config.settings.mysql != null) { modules.push('mysql2@3.15.1'); } // Add MySQL.
         //if (config.settings.mysql != null) { modules.push('@mysql/xdevapi@8.0.33'); } // Add MySQL, official driver (https://dev.mysql.com/doc/dev/connector-nodejs/8.0/)
