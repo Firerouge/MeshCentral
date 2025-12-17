@@ -28,6 +28,26 @@ For more information, [visit MeshCentral.com](https://meshcentral.com).
 
 The [Design and Architecture Guide](https://meshcentral.com/docs/MeshCentral2DesignArchitecture.pdf) is a short document that includes information on the design overview, dependencies, source code descriptions of each file, certificates, TLS security, the agent to server handshake, browser to agent relay and WebRTC and the messenger service.
 
+## DNS-01 challenge example with Cloudflare
+MeshCentral can request Let's Encrypt certificates using the DNS-01 challenge for environments where HTTP-01 is not possible. The server loads existing ACME DNS helpers (such as the `acme-dns-01-*` family) based on the configured provider. When using Cloudflare DNS, configure `letsencrypt` in `config.json` with a DNS API token:
+
+```
+{
+  "letsencrypt": {
+    "email": "admin@example.com",
+    "names": "mesh.example.com",
+    "challenge": "dns-01",
+    "dns": {
+      "provider": "acme-dns-01-cloudflare",
+      "token": "CF_API_TOKEN_WITH_DNS_EDIT",
+      "verifyPropagation": true
+    }
+  }
+}
+```
+
+Use a Cloudflare API token that can edit DNS records on the target zone. With this configuration MeshCentral will automatically create and clean up `_acme-challenge` TXT records during certificate issuance. Other providers can be used by setting `letsencrypt.dns.provider` (or `letsencrypt.dns.module`) to the relevant ACME DNS helper module name and supplying its options under `letsencrypt.dns.options` when required.
+
 ## Video Tutorials
 You can watch many tutorial videos on the [MeshCentral YouTube Channel](https://www.youtube.com/channel/UCJWz607A8EVlkilzcrb-GKg/videos). Two videos to get started involve installation and basic usages.
 

@@ -3999,6 +3999,15 @@
           "default": false,
           "description": "By default, MeshCentral will perform a self-test to make sure HTTP port 80 can respond correctly before making a request to Let's Encrypt. In some cases, this self-test can't work and must be skipped."
         },
+        "challenge": {
+          "type": "string",
+          "default": "http-01",
+          "enum": [
+            "http-01",
+            "dns-01"
+          ],
+          "description": "Select the ACME challenge type to use. Defaults to http-01."
+        },
         "production": {
           "type": "boolean",
           "default": false,
@@ -4059,6 +4068,43 @@
               "default": ""
             }
           }
+        },
+        "dns": {
+          "type": "object",
+          "description": "Options for DNS-01 challenges using existing DNS provider modules (for example, acme-dns-01-*).",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "description": "DNS provider identifier or npm package name to use for DNS-01 challenges (for example, acme-dns-01-cloudflare)."
+            },
+            "module": {
+              "type": "string",
+              "description": "Override the npm package name for the DNS-01 provider. If omitted, the provider value is used."
+            },
+            "options": {
+              "type": "object",
+              "description": "Provider-specific options passed directly to the DNS-01 module.",
+              "additionalProperties": true
+            },
+            "token": {
+              "type": "string",
+              "description": "Provider API token (kept for compatibility with common DNS helpers)."
+            },
+            "email": {
+              "type": "string",
+              "description": "Provider account email (kept for compatibility with common DNS helpers)."
+            },
+            "key": {
+              "type": "string",
+              "description": "Provider API key (kept for compatibility with common DNS helpers)."
+            },
+            "verifyPropagation": {
+              "type": "boolean",
+              "default": false,
+              "description": "Enable propagation checks when supported by the DNS helper."
+            }
+          },
+          "additionalProperties": true
         }
       },
       "required": [
